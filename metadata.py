@@ -1,5 +1,5 @@
 
-from os import walk, listdir
+from os import walk, listdir, path
 from os.path import join, isdir
 import sys
 
@@ -125,7 +125,7 @@ class Metadata(object):
             imgs = numpy.ndarray((numpy.size(value), numpy.size(arr,0), 
                                   numpy.size(arr,1)),arr.dtype)
             for img_idx, fname in enumerate(value):
-                sys.stdout.write("\r"+'opening '+fname)
+                sys.stdout.write("\r"+'opening '+path.split(fname)[-1])
                 sys.stdout.flush()
                 #print('\r'+'opening '+fname); 
                 imgs[img_idx,:,:]=io.imread(join(fname))
