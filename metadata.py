@@ -34,11 +34,19 @@ class Metadata(object):
         self.image_table['XYbefore'] = [map(float, i.split()) for i in self.image_table.XYbefore.values]
         
     def load_metadata(self, pth, fname='Metadata.txt', delimiter='\t'):
+        """
+        Helper function to load a text metadata file.
+        """
         md = pandas.read_csv(join(pth, fname), delimiter=delimiter)
         md.filename = [join(pth, f) for f in md.filename]
         return md
         
     def merge_mds(self, mds):
+        """
+        Merge to metadata tables.
+        
+        WARNING: Not sophisticated enough to check for any duplicated information.
+        """
         if not isinstance(mds, list):
             raise ValueError("mds argument must be a list of pandas image tables")
         og_md = mds[0]
@@ -47,6 +55,9 @@ class Metadata(object):
         return og_md
         
     def codestack_read(self, pos, z, bitmap, hybe_names=['hybe1', 'hybe2', 'hybe3', 'hybe4', 'hybe5', 'hybe6'], fnames_only=False):
+        """
+        Wrapper to load seqFISH images.
+        """
         hybe_ref = 1
         seq_name, hybe, channel = bitmap[0]
         stk = [self.stkread(Position=pos, Zindex=z, hybe=hybe, 
@@ -61,6 +72,34 @@ class Metadata(object):
             
     def stkread(self, groupby='Position', sortby='TimestampFrame',
                 fnames_only=False, metadata=False, **kwargs):
+        """
+        Main interface of Metadata
+        
+        Parameters
+        ----------
+        groupby : str - all images with the same groupby field with be stacked
+        sortby : str, list(str) - images in stks will be ordered by this(these) fields
+        fnames_only : Bool (default False) - lazy loading
+        metadata : Bool (default False) - whether to return metadata of images
+        
+        kwargs : Property Value pairs to subset images (see below)
+        
+        Returns
+        -------
+        stk of images if only one value of the groupby_value
+        dictionary (groupby_value : stk) if more than one groupby_value
+        stk/dict, metadata table if metadata=True
+        fnames if fnames_only true
+        fnames, metadata table if fnames_only and metadata
+        
+        Implemented kwargs
+        ------------------
+        Position : str, list(str)
+        Channel : str, list(str)
+        Zindex : int, list(int)
+        acq : str, list(str)
+        hybe : str, list(str)
+        """
         # Input coercing
         for key, value in kwargs.items():
             if not isinstance(value, list):
@@ -117,6 +156,9 @@ class Metadata(object):
         return fname
         
     def _read_local(self, filename_dict, verbose=False):
+        """
+        Load images into dictionary of stks.
+        """
         images_dict = {}
         for key, value in filename_dict.items():
             # key is groupby property value
