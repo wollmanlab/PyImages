@@ -195,7 +195,7 @@ def watershed(markers, im_bin, im_edge, d_mat, val, edges):
     return labels
 
 
-def segment_image(im, params, clf = 0):
+def segment_image(im, params=None):
     """
     Segment images.
     
@@ -231,13 +231,25 @@ def segment_image(im, params, clf = 0):
     https://github.com/samocooper/nuclitrack
     
     """
-    
+    if params is None:
+        params = {
+    'clip_limit' : 0.17, # 0-1
+    'background_blur' : 180, #block size I think?
+    'image_blur' : 4.0, #gaussian kernal
+    'threshold' : 0.20, #0-1
+    'smallest_object' : 40, #pixels
+    'dist_intensity_ratio' : 0.75, #0-1 weight
+    'separation_distance' : 8, #pixels
+    'edge_filter_blur' : 2.0, #kernel width in pixels
+    'watershed_ratio' : 0.15, #0-1 ratio of distance from edge vs bwgeodesic
+    'remove_image_edges': 1, # If true set all edges to 0
+             }
 
     #im = movie.comb_im(params[15:].astype(int), frame)
 
-    image = clipping(im, params[0])
-    image2 = background(image, params[1])
-    image3 = blur(image2, params[2])
+    image = clipping(im, params['clip_limit'])
+    image2 = background(image, params['background_blur'])
+    image3 = blur(image2, params['image_blur'])
 
 #     if clf is not 0:
 # 
@@ -246,15 +258,15 @@ def segment_image(im, params, clf = 0):
 #         if params[12] > 0:
 #             image3 = open_close(image3, params[12])
 
-    im_bin = threshold(image3, params[3])
-    im_bin = object_filter(im_bin, params[4])
-    [cell_center, d_mat] = cell_centers(image3, im_bin, params[5])
-    markers = fg_markers(cell_center, im_bin, params[6], params[9])
-    im_edge = sobel_edges(image, params[7])
+    im_bin = threshold(image3, params['threshold'])
+    im_bin = object_filter(im_bin, params['smallest_object'])
+    [cell_center, d_mat] = cell_centers(image3, im_bin, params['dist_intensity_ratio'])
+    markers = fg_markers(cell_center, im_bin, params['separation_distance'], params['remove_image_edges'])
+    im_edge = sobel_edges(image, params['edge_filter_blur'])
 
-    im = watershed(markers, im_bin, im_edge, d_mat, params[8], params[9])
+    im = watershed(markers, im_bin, im_edge, d_mat, params['watershed_ratio'], params['remove_image_edges'])
 
-    if params[9] == 1:
+    if params['remove_image_edges'] == 1:
 
         vals = np.unique(np.concatenate((im[0, :].flatten(),
                                         im[:, 0].flatten(),

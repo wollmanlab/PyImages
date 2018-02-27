@@ -31,11 +31,24 @@ class Metadata(object):
             raise NotImplementedError("google_cloud loading is not implemented.")
         # Handle columns that don't import from text well
         self.image_table['XY'] = [map(float, i.split()) for i in self.image_table.XY.values]
-        self.image_table['XYbefore'] = [map(float, i.split()) for i in self.image_table.XYbefore.values]
+        # Solved same problem in two different ways on Ninja and Hype scope (compatability ~Jan 2018) resolve and remove
+        if 'XYbefore' in self.image_table.columns():
+                self.image_table['XYbefore'] = [map(float, i.split()) for i in self.image_table.XYbefore.values]
+                    elif 'XYbeforeTransform' in self.image_table.columns():
+                self.image_table['XYbeforeTransform'] = [map(float, i.split()) for i in self.image_table.XYbeforeTransform.values]
         
     def load_metadata(self, pth, fname='Metadata.txt', delimiter='\t'):
         """
         Helper function to load a text metadata file.
+        
+        Parameters
+        ----------
+        pth : str - path to metadata
+        fname : str - filename of the delimited version of metadata
+        
+        Returns
+        -------
+        md : Metadata
         """
         md = pandas.read_csv(join(pth, fname), delimiter=delimiter)
         md.filename = [join(pth, f) for f in md.filename]
@@ -57,6 +70,18 @@ class Metadata(object):
     def codestack_read(self, pos, z, bitmap, hybe_names=['hybe1', 'hybe2', 'hybe3', 'hybe4', 'hybe5', 'hybe6'], fnames_only=False):
         """
         Wrapper to load seqFISH images.
+        
+        Parameters
+        ----------
+        pos : str - positions name to load
+        z : int - Zindex
+        bitmap : list - config input to map images to codewords
+        
+        Returns
+        -------
+        dict of stks
+        or
+        list of filenames
         """
         hybe_ref = 1
         seq_name, hybe, channel = bitmap[0]
@@ -146,6 +171,7 @@ class Metadata(object):
             else:
                 return self._open_file(fnames_output) 
     # Would be good to not depend on tifffile since I've had problems installing it sometimes.
+# Can probably move to skimage.io.imsave but maybe not as robust at being loadable by ImageJ?
     def save_images(self, images, fname = '/Users/robertf/Downloads/tmp_stk.tif'):
         with TiffWriter(fname, bigtiff=False, imagej=True) as t:
             if len(images.shape)>2:
@@ -167,13 +193,40 @@ class Metadata(object):
             imgs = numpy.ndarray((numpy.size(value), numpy.size(arr,0), 
                                   numpy.size(arr,1)),arr.dtype)
             for img_idx, fname in enumerate(value):
+                # Printing overtop of previous fname prints
                 sys.stdout.write("\r"+'opening '+path.split(fname)[-1])
                 sys.stdout.flush()
-                #print('\r'+'opening '+fname); 
                 imgs[img_idx,:,:]=io.imread(join(fname))
                 img_idx+=1
             images_dict[key] = imgs.transpose([1,2,0])          
             if verbose:
                 print('Loaded {0} group of images.'.format(key))
             #from IPython.core.debugger import Tracer; Tracer()()
+            print('\n') # Make sure prints on new line due to buffer flushing above.
         return images_dict
+        
+    def doFlatfieldCorrection(img, flt, **kwargs):
+        """
+        Perform flatfield correction.
+        
+        Parameters
+        ----------
+        img : numpy.ndarray
+            2D image of type integer
+        flt : numpy.ndarray
+            2D image of type integer with the flatfield
+        """
+        cameraoffset = 100./2**16
+        bitdepth = 2.**16
+        flt = float(flt) - cameraoffset
+        flt = np.divide(flt, np.nanmean(flt.flatten()))
+        
+        img = np.divide(float(img-cameraoffset), flt+cameraoffset)
+        flat_img = img.flatten()
+        rand_subset = np.random.randint(0, high=len(flat_img), size=10000)
+        flat_img = flat_img[rand_subset]
+        flat_img = np.percentile(flat_img, 1)
+        np.place(img, flt<0.05, flat_img)
+        np.place(img, img<0, 0)
+        np.place(img, img>bitdepth, bitdepth)
+        return img
