@@ -32,9 +32,9 @@ class Metadata(object):
         # Handle columns that don't import from text well
         self.image_table['XY'] = [map(float, i.split()) for i in self.image_table.XY.values]
         # Solved same problem in two different ways on Ninja and Hype scope (compatability ~Jan 2018) resolve and remove
-        if 'XYbefore' in self.image_table.columns():
+        if 'XYbefore' in list(self.image_table.columns):
             self.image_table['XYbefore'] = [map(float, i.split()) for i in self.image_table.XYbefore.values]
-        elif 'XYbeforeTransform' in self.image_table.columns():
+        elif 'XYbeforeTransform' in list(self.image_table.columns):
             self.image_table['XYbeforeTransform'] = [map(float, i.split()) for i in self.image_table.XYbeforeTransform.values]
         
     def load_metadata(self, pth, fname='Metadata.txt', delimiter='\t'):
