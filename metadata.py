@@ -59,6 +59,7 @@ class Metadata(object):
             else:
                 converted.append(i)
         self.image_table[column] = converted
+
     def load_metadata(self, pth, fname='Metadata.txt', delimiter='\t'):
         """
         Helper function to load a text metadata file.
