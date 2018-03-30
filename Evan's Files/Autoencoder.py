@@ -164,4 +164,4 @@ def build_graph(train_data, n_hidden, n_epochs, batch_size, learn_rate, dim_z):
             # if minimum loss is updated or final epoch, finish
             if min_tot_loss > tot_loss or epoch + 1 == n_epochs:
                 print('Done training!')
-    return ????
+    return None
