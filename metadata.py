@@ -1,12 +1,15 @@
-
+# Metadata imports
 from os import walk, listdir, path
 from os.path import join, isdir
 import sys
 
 import pandas
 import numpy
+import numpy as np
 
 from skimage import img_as_float, img_as_uint, io
+
+#stkshow imports
 
 class Metadata(object):
     def __init__(self, pth, md_name='Metadata.txt', load_type='local'):
@@ -22,7 +25,10 @@ class Metadata(object):
             all_mds = []
             for subdir, curdir, filez in walk(pth):
                 if md_name in filez:
-                    all_mds.append(self.load_metadata(join(pth, subdir), fname=md_name))
+                    try:
+                        all_mds.append(self.load_metadata(join(pth, subdir), fname=md_name))
+                    except:
+                        continue
             self.image_table = self.merge_mds(all_mds)
         # Future compability for different load types (e.g. remote vs local)
         if load_type=='local':
@@ -30,25 +36,33 @@ class Metadata(object):
         elif load_type=='google_cloud':
             raise NotImplementedError("google_cloud loading is not implemented.")
         # Handle columns that don't import from text well
-        self.image_table['XY'] = [map(float, i.split()) for i in self.image_table.XY.values]
-        # Solved same problem in two different ways on Ninja and Hype scope (compatability ~Jan 2018) resolve and remove
+        self.convert_data('XY', float)
         if 'XYbefore' in list(self.image_table.columns):
-            self.image_table['XYbefore'] = [map(float, i.split()) for i in self.image_table.XYbefore.values]
-        elif 'XYbeforeTransform' in list(self.image_table.columns):
-            self.image_table['XYbeforeTransform'] = [map(float, i.split()) for i in self.image_table.XYbeforeTransform.values]
-        
+            self.convert_data('XYbefore', float)
+        if 'XYbeforeTransform' in list(self.image_table.columns):
+            self.convert_data('XYbeforeTransform', float)
+        if 'linescan' in list(self.image_table.columns):
+            self.convert_data('linescan', float)
+    @property
+    def posnames(self):
+        return self.image_table.Position.unique()
+    @property
+    def acqnames(self):
+        return self.image_table.acq.unique()
+    def convert_data(self, column, dtype, isnan=np.nan):
+        converted = []
+        arr = self.image_table[column].values
+        for i in arr:
+            if isinstance(i, str):
+                i = np.array(list(map(dtype, i.split())))
+                converted.append(i)
+            else:
+                converted.append(i)
+        self.image_table[column] = converted
+
     def load_metadata(self, pth, fname='Metadata.txt', delimiter='\t'):
         """
         Helper function to load a text metadata file.
-        
-        Parameters
-        ----------
-        pth : str - path to metadata
-        fname : str - filename of the delimited version of metadata
-        
-        Returns
-        -------
-        md : Metadata
         """
         md = pandas.read_csv(join(pth, fname), delimiter=delimiter)
         md.filename = [join(pth, f) for f in md.filename]
@@ -70,18 +84,6 @@ class Metadata(object):
     def codestack_read(self, pos, z, bitmap, hybe_names=['hybe1', 'hybe2', 'hybe3', 'hybe4', 'hybe5', 'hybe6'], fnames_only=False):
         """
         Wrapper to load seqFISH images.
-        
-        Parameters
-        ----------
-        pos : str - positions name to load
-        z : int - Zindex
-        bitmap : list - config input to map images to codewords
-        
-        Returns
-        -------
-        dict of stks
-        or
-        list of filenames
         """
         hybe_ref = 1
         seq_name, hybe, channel = bitmap[0]
@@ -91,12 +93,12 @@ class Metadata(object):
             stk.append(self.stkread(Position=pos, Zindex=z, hybe=hybe, 
                                    Channel=channel, fnames_only=True)[pos][0])
         if fnames_only:
-            return [i[0] for i in stk]
+            return [i for i in stk]
         else:
             return self._open_file({pos: [i for i in stk]})
             
     def stkread(self, groupby='Position', sortby='TimestampFrame',
-                fnames_only=False, metadata=False, **kwargs):
+                fnames_only=False, metadata=False, ffield=False, **kwargs):
         """
         Main interface of Metadata
         
@@ -166,12 +168,18 @@ class Metadata(object):
                 return fnames_output
         else:
             if metadata:
-                mdata = mdata[posname]
-                return self._open_file(fnames_output), mdata
+                if len(mdata)==1:
+                    mdata = mdata[posname]
+                    return self._open_file(fnames_output)[posname], mdata
+                else:
+                    return self._open_file(fnames_output), mdata
             else:
-                return self._open_file(fnames_output) 
+                stk = self._open_file(fnames_output) 
+                if len(list(stk.keys()))==1:
+                    return stk[posname]
+                else:
+                    return stk
     # Would be good to not depend on tifffile since I've had problems installing it sometimes.
-# Can probably move to skimage.io.imsave but maybe not as robust at being loadable by ImageJ?
     def save_images(self, images, fname = '/Users/robertf/Downloads/tmp_stk.tif'):
         with TiffWriter(fname, bigtiff=False, imagej=True) as t:
             if len(images.shape)>2:
@@ -181,7 +189,7 @@ class Metadata(object):
                 t.save(img_as_uint(images))
         return fname
         
-    def _read_local(self, filename_dict, verbose=False):
+    def _read_local(self, filename_dict, ffield=False, verbose=False):
         """
         Load images into dictionary of stks.
         """
@@ -193,19 +201,24 @@ class Metadata(object):
             imgs = numpy.ndarray((numpy.size(value), numpy.size(arr,0), 
                                   numpy.size(arr,1)),arr.dtype)
             for img_idx, fname in enumerate(value):
-                # Printing overtop of previous fname prints
                 sys.stdout.write("\r"+'opening '+path.split(fname)[-1])
                 sys.stdout.flush()
-                imgs[img_idx,:,:]=io.imread(join(fname))
+                #print('\r'+'opening '+fname);
+                img = io.imread(join(fname))
+                if ffield:
+                    img = self.doFlatFieldCorrection(img, fname)
+                imgs[img_idx,:,:]=img
                 img_idx+=1
             images_dict[key] = imgs.transpose([1,2,0])          
             if verbose:
                 print('Loaded {0} group of images.'.format(key))
             #from IPython.core.debugger import Tracer; Tracer()()
-            print('\n') # Make sure prints on new line due to buffer flushing above.
         return images_dict
+
+
+
         
-    def doFlatfieldCorrection(img, flt, **kwargs):
+    def doFlatfieldCorrection(self, img, flt, **kwargs):
         """
         Perform flatfield correction.
         
@@ -218,10 +231,10 @@ class Metadata(object):
         """
         cameraoffset = 100./2**16
         bitdepth = 2.**16
-        flt = float(flt) - cameraoffset
+        flt = flt.astype(np.float32) - cameraoffset
         flt = np.divide(flt, np.nanmean(flt.flatten()))
         
-        img = np.divide(float(img-cameraoffset), flt+cameraoffset)
+        img = np.divide((img-cameraoffset).astype(np.float32), flt+cameraoffset)
         flat_img = img.flatten()
         rand_subset = np.random.randint(0, high=len(flat_img), size=10000)
         flat_img = flat_img[rand_subset]
