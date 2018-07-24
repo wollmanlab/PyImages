@@ -6,6 +6,7 @@ import sys
 import pandas
 import numpy
 import numpy as np
+from ast import literal_eval
 
 from skimage import img_as_float, img_as_uint, io
 
@@ -16,6 +17,7 @@ class Metadata(object):
         """
         Load metadata files.
         """
+        self.base_pth = pth;
         # short circuit recursive search for metadatas if present in the top directory of 
         # the supplied pth.
         if md_name in listdir(pth):
@@ -36,13 +38,19 @@ class Metadata(object):
         elif load_type=='google_cloud':
             raise NotImplementedError("google_cloud loading is not implemented.")
         # Handle columns that don't import from text well
-        self.convert_data('XY', float)
-        if 'XYbefore' in list(self.image_table.columns):
-            self.convert_data('XYbefore', float)
-        if 'XYbeforeTransform' in list(self.image_table.columns):
-            self.convert_data('XYbeforeTransform', float)
-        if 'linescan' in list(self.image_table.columns):
-            self.convert_data('linescan', float)
+        try:
+            self.convert_data('XY', float)
+            if 'XYbefore' in list(self.image_table.columns):
+                self.convert_data('XYbefore', float)
+            if 'XYbeforeTransform' in list(self.image_table.columns):
+                self.convert_data('XYbeforeTransform', float)
+            if 'linescan' in list(self.image_table.columns):
+                self.convert_data('linescan', float)
+        except Exception as e:
+            self.image_table['XY'] = [literal_eval(i) for i in self.image_table['XY']]
+            self.image_table['XYbeforeTransform'] = [literal_eval(i) for i in self.image_table['XYbeforeTransform']]
+            
+            
     @property
     def posnames(self):
         return self.image_table.Position.unique()
@@ -65,6 +73,7 @@ class Metadata(object):
         Helper function to load a text metadata file.
         """
         md = pandas.read_csv(join(pth, fname), delimiter=delimiter)
+        md['root_pth'] = md.filename
         md.filename = [join(pth, f) for f in md.filename]
         return md
         
@@ -159,6 +168,8 @@ class Metadata(object):
         for posname in image_groups.groups.keys():
             fnames_output[posname] = image_subset_table.loc[image_groups.groups[posname]].filename.values
             mdata[posname] = image_subset_table.loc[image_groups.groups[posname]]
+        # Clunky block of code below allows getting filenames only, and handles returning 
+        # dictionary if multiple groups present or ndarray only if single group
         if fnames_only:
             if metadata:
                 if len(mdata)==1:
@@ -179,7 +190,6 @@ class Metadata(object):
                     return stk[posname]
                 else:
                     return stk
-    # Would be good to not depend on tifffile since I've had problems installing it sometimes.
     def save_images(self, images, fname = '/Users/robertf/Downloads/tmp_stk.tif'):
         with TiffWriter(fname, bigtiff=False, imagej=True) as t:
             if len(images.shape)>2:
@@ -201,14 +211,16 @@ class Metadata(object):
             imgs = numpy.ndarray((numpy.size(value), numpy.size(arr,0), 
                                   numpy.size(arr,1)),arr.dtype)
             for img_idx, fname in enumerate(value):
+                # Weird print style to print on same line
                 sys.stdout.write("\r"+'opening '+path.split(fname)[-1])
                 sys.stdout.flush()
-                #print('\r'+'opening '+fname);
                 img = io.imread(join(fname))
                 if ffield:
                     img = self.doFlatFieldCorrection(img, fname)
                 imgs[img_idx,:,:]=img
                 img_idx+=1
+            # Best performance has most frequently indexed dimension first we're 
+            # reordering here to maintain convention of Wollman lab
             images_dict[key] = imgs.transpose([1,2,0])          
             if verbose:
                 print('Loaded {0} group of images.'.format(key))
@@ -229,6 +241,7 @@ class Metadata(object):
         flt : numpy.ndarray
             2D image of type integer with the flatfield
         """
+        print("Not implemented well. Woulnd't advise using")
         cameraoffset = 100./2**16
         bitdepth = 2.**16
         flt = flt.astype(np.float32) - cameraoffset

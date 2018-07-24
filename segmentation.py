@@ -1,10 +1,8 @@
-import ctoolsegmentation
 import numpy as np
 from skimage import filters
 from skimage import morphology
 from skimage.feature import peak_local_max
 from scipy import ndimage
-import classifyim
 
 
 def clipping(im, val):
@@ -22,7 +20,7 @@ def background(im, val):
     im_temp = im.copy()
 
     if val != 0:
-        im_temp = im_temp - ctoolsegmentation.fast_blur(im_temp, val)
+        im_temp = im_temp - filters.gaussian(im_temp, val)
 
     return im_temp
 
