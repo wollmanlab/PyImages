@@ -55,6 +55,15 @@ class Metadata(object):
     def posnames(self):
         return self.image_table.Position.unique()
     @property
+    def hybenames(self):
+        return self.image_table.hybe.unique()
+    @property
+    def channels(self):
+        return self.image_table.Channel.unique()
+    @property
+    def Zindexes(self):
+        return self.image_table.Zindex.unique()
+    @property
     def acqnames(self):
         return self.image_table.acq.unique()
     def convert_data(self, column, dtype, isnan=np.nan):
@@ -90,7 +99,7 @@ class Metadata(object):
             og_md = og_md.append(md, ignore_index=True)
         return og_md
         
-    def codestack_read(self, pos, z, bitmap, hybe_names=['hybe1', 'hybe2', 'hybe3', 'hybe4', 'hybe5', 'hybe6'], fnames_only=False):
+    def codestack_read(self, pos, z, bitmap, hybe_names=['hybe1', 'hybe2', 'hybe3', 'hybe4', 'hybe5', 'hybe6', 'hybe7', 'hybe8', 'hybe9'], fnames_only=False):
         """
         Wrapper to load seqFISH images.
         """
