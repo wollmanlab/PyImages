@@ -56,7 +56,13 @@ class Metadata(object):
         return self.image_table.Position.unique()
     @property
     def hybenames(self):
-        return self.image_table.hybe.unique()
+        acqs = self.image_table.acq.unique()
+        hybes = [i.split('_')[0] for i in acqs]
+        hybenames = []
+        for name in hybes:
+            if 'hybe' in name:
+                hybenames.append(name)
+        return hybenames
     @property
     def channels(self):
         return self.image_table.Channel.unique()
@@ -85,6 +91,17 @@ class Metadata(object):
         md['root_pth'] = md.filename
         md.filename = [join(pth, f) for f in md.filename]
         return md
+    
+    def update_metadata(self,acqs='All',fname='Metadata.txt', delimiter='\t'):
+        """
+        Helper function to update a text metadata file.
+        """
+        if acqs == 'All':
+            for acq in self.image_table.acq.unique():
+                self.image_table[self.image_table.acq==acq].to_csv(join(pth, fname),sep=delimiter,index='False')
+        else:
+            for acq in acqs:
+                self.image_table[self.image_table.acq==acq].to_csv(join(pth, fname),sep=delimiter,index='False')
         
     def merge_mds(self, mds):
         """
