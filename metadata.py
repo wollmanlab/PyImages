@@ -92,16 +92,16 @@ class Metadata(object):
         md.filename = [join(pth, f) for f in md.filename]
         return md
     
-    def update_metadata(self,acqs='All',fname='Metadata.txt', delimiter='\t'):
-        """
-        Helper function to update a text metadata file.
-        """
-        if acqs == 'All':
-            for acq in self.image_table.acq.unique():
-                self.image_table[self.image_table.acq==acq].to_csv(join(pth, fname),sep=delimiter,index='False')
-        else:
-            for acq in acqs:
-                self.image_table[self.image_table.acq==acq].to_csv(join(pth, fname),sep=delimiter,index='False')
+#     def update_metadata(self,acqs='All',fname='Metadata.txt', delimiter='\t'):
+#         """
+#         Helper function to update a text metadata file.
+#         """
+#         if acqs == 'All':
+#             for acq in self.image_table.acq.unique():
+#                 self.image_table[self.image_table.acq==acq].to_csv(join(pth, fname),sep=delimiter,index='False')
+#         else:
+#             for acq in acqs:
+#                 self.image_table[self.image_table.acq==acq].to_csv(join(pth, fname),sep=delimiter,index='False')
         
     def merge_mds(self, mds):
         """
