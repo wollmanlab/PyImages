@@ -1,12 +1,18 @@
 # Segment imports
 import warnings
 import numpy
+import multiprocessing
+from functools import partial
+import dill as pickle
 from scipy.ndimage import binary_fill_holes, binary_erosion, distance_transform_edt, binary_closing, binary_dilation
 from scipy.ndimage import binary_dilation
 from skimage.morphology import remove_small_objects, disk, erosion, watershed
 from skimage import filters, img_as_uint
 from skimage.feature import peak_local_max
 from skimage.measure import label, regionprops
+import matplotlib.pyplot as plt
+from image_show import imadjust
+
 # from skfmm import distance
 # Tracking imports
 import lap
@@ -14,9 +20,27 @@ import lap
 # Cell Label imports
 import numpy
 import numpy as np
+import pandas as pd
 from scipy.sparse import bsr_matrix
 from scipy.spatial import KDTree, distance_matrix, distance
 from collections import Counter, defaultdict
+
+
+
+def pfunc_calc_distance(ti, tj, lbls, max_displacement=25):
+    lbl_i, lbl_j = lbls[ti], lbls[tj] # Assuming these are centroids
+    cost_matrix = distance_matrix(lbl_i, lbl_j)
+    total_cost, column2row, row2column = lap.lapjv(cost_matrix,
+                                                   cost_limit=max_displacement,
+                                                   extend_cost=True)
+    # Parse LAP output to build dictionary of paired items
+    trackdict = {}
+    for col, row in enumerate(column2row):
+        if row == -1:
+            trackdict[(ti, tuple(lbl_i[col]))] = -1
+        else:
+            trackdict[(ti, tuple(lbl_i[col]))] = (tj, tuple(lbl_j[row]))
+    return trackdict
 
 def parseVarargin(varargin, arg):
     for k, v in varargin.items():
@@ -27,7 +51,7 @@ def parseVarargin(varargin, arg):
     return arg
 
 #Segment Nuclei 20X
-class CellLabel(object):
+class CellLabel(pickle.Pickler):
     def __init__(self, pth):
         self.T = []
         self.Reg = None
@@ -48,7 +72,14 @@ class CellLabel(object):
         lbl = self.Labels[labeltype][T]
         regprops = regionprops(lbl)
         if return_as=='dict':
-            return {p['label']: p['centroid'] for p in regprops}
+            return {p['label']: p['centroid'] for p in regprops if p['label']>0}
+    def get_label_region_property(self, T, property_name, labeltype='nuc', return_as='dict'):
+        if T not in self.Labels[labeltype]:
+            return 'Failed: timepoint not in labels'
+        lbl = self.Labels[labeltype][T]
+        regprops = regionprops(lbl)
+        if return_as=='dict':
+            return {p['label']: p[property_name] for p in regprops}
 
     def relabel(self, tracks, labeltype='nuc'):
         lbls = self.Labels[labeltype]
@@ -67,7 +98,7 @@ class CellLabel(object):
 
     
     def trackLabels(self, labeltype='nuc', max_displacement=50,
-                    max_discontinuity=3):
+                    max_discontinuity=3, fraction_tracked=0.75, ncpu=12):
         lbls = {tp: list(self.getXY(tp).values())
                 for tp in self.Labels[labeltype].keys()}
         
@@ -77,26 +108,35 @@ class CellLabel(object):
             warnings.warn("There is only one label so nothing was tracked.")
             return
         timepoints = sorted(list(lbls.keys()))
-        consecutive_tp_pairs = [(timepoints[i], timepoints[i+1])
+        consecutive_tp_pairs = [(timepoints[i], timepoints[i+1], lbls)
                         for i in range(len(timepoints)-1)]
         tp2idx = {tp:i for i, tp in enumerate(timepoints)}
-        trackdict = {}
+        
         # Loop over all consecutive timepoints and use LAP to track
         # Cost is simply the distance of nuclei centroids
-        for ti, tj in consecutive_tp_pairs:
-            lbl_i, lbl_j = lbls[ti], lbls[tj] # Assuming these are centroids
-            cost_matrix = distance_matrix(lbl_i, lbl_j)
-            total_cost, column2row, row2column = lap.lapjv(cost_matrix,
-                                                           cost_limit=max_displacement,
-                                                           extend_cost=True)
-            # Parse LAP output to build dictionary of paired items
-            for col, row in enumerate(column2row):
-                if row == -1:
-                    trackdict[(ti, tuple(lbl_i[col]))] = -1
-                else:
-                    trackdict[(ti, tuple(lbl_i[col]))] = (tj, tuple(lbl_j[row]))
+        if ncpu > 1:
+            pfunc = partial(pfunc_calc_distance, max_displacement=max_displacement)
+            with multiprocessing.Pool(ncpu) as ppool:
+                tdicts = ppool.starmap(pfunc, consecutive_tp_pairs)
+            trackdict = {}
+            for t in tdicts:
+                trackdict.update(t)
+        else:
+            trackdict = {}
+            for ti, tj, lbls in consecutive_tp_pairs:
+                tdicts = pfunc_calc_distance(ti, tj, lbls, max_displacement=max_displacement)
+                trackdict.update(tdicts)
+        if len(timepoints)<=2:
+            full_tracks = {(k, v): idx for idx, (k,v) in enumerate(trackdict.items()) if not v==-1}
+            full_tracks = {k: idx for idx, (k,v) in enumerate(full_tracks.items())}
+            print(len(full_tracks), 'Total tracks found.')
+            self.tracks = full_tracks
+            self.cell_ids = len(full_tracks)
+            return full_tracks
+#         print(trackdict)
         # Merge all pairs that link together into merged track
         # Pairs are linked if they connected through a common element.
+        print(trackdict[list(trackdict.keys())[0]])
         merged_tracks = []
         for k, v in list(trackdict.items()):
             if v in trackdict: # Condition means v links to another pair from different timepoint
@@ -110,8 +150,10 @@ class CellLabel(object):
                 if not v == -1: # If last element is unpaired add just the key
                     merged_track += [v] # else add the last linked item
                 merged_tracks.append(merged_track)
+        
         # Remove complete tracks from further linking (i.e. all timepoints are connected)
         incomplete_tracks = [t for t in merged_tracks if len(t)<len(lbls)]
+        print(len(merged_tracks), 'Tracks found with', len(incomplete_tracks), 'incomplete tracks.')
         tracks = incomplete_tracks
         # Build data structures for gap closing cost matrix creation
         track_starts = np.array([i[0][0] for i in tracks])
@@ -121,6 +163,7 @@ class CellLabel(object):
         track_xy_end = np.array([i[-1][1] for i in tracks])
         
         # Try to link more tracks by allowing gaps within track
+        n = len(tracks)
         gap_cost_mat = np.ones((n, n))*(max_displacement+1) # this should be bigger than max_displacement
         for idx, trck in enumerate(tracks):
             tstart = trck[0][0]
@@ -148,9 +191,6 @@ class CellLabel(object):
                     if d>max_displacement:
                         break
                     else:
-                        cc.append(d)
-                        ii.append(idx)
-                        kk.append(tidx)
                         gap_cost_mat[idx, tracks_ending_before_this_track[tidx]] = d
         a,b,c = lap.lapjv(gap_cost_mat, cost_limit=max_displacement,
                           extend_cost=True)
@@ -169,8 +209,15 @@ class CellLabel(object):
             if track not in final_tracks:
                 final_tracks[track] = track_id
                 track_id += 1
-        self.tracks = final_tracks
-        return final_tracks
+        
+        
+        full_tracks = {k: v for k, v in final_tracks.items()
+                        if len(k)/len(lbls)>fraction_tracked}
+        full_tracks = {k: idx+1 for idx, (k,v) in enumerate(full_tracks.items())}
+        print(len(full_tracks), 'Total tracks found.')
+        self.tracks = full_tracks
+        self.cell_ids = len(full_tracks)
+        return full_tracks
     #print(merged_xys)
     
     def addLabel(self, newlabel, labeltype, T, varargin={}):
@@ -182,31 +229,52 @@ class CellLabel(object):
         
         newlabel = newlabel.astype(numpy.uint16)
         self.Labels[labeltype][T] = newlabel
-    
+
     def applyFuncPerLabel(self, stk, T, func=numpy.mean, varargin={},
-                          outtype='matrix'):
+                              outtype='matrix', labeltype='nuc', ncpu=12):
+        global lbls
         assert stk.shape[2]==len(T)
         label_values = defaultdict(list)
-        label_timestamps = self.Labels.keys()
-        label_props = {t:regionprops(self.Labels[t].toarray()) for t in label_timestamps}
+        label_timestamps = list(self.Labels[labeltype].keys())
+        lbls = self.Labels[labeltype]
         label_map = {}
         for t in T:
             label_map[t] = label_timestamps[numpy.argsort(numpy.subtract(label_timestamps, t))[0]]
-        data = numpy.zeros((len(self.cell_ids), len(T)))
-        label_to_idx = {j:idx for idx, j in enumerate(self.cell_ids)}
-        for idx, t in enumerate(T):
-            props = label_props[label_map[t]]
-            for p in props:
-                if p.label not in self.cell_ids:
-                    continue
-                #get_vals(stk[:,:,idx], p.coords)
-                vals = [stk[x,y,idx] for x,y in p.coords]
-                data[label_to_idx[p.label], idx] = func(vals)
-                label_values[p.label].append((t*1440, func(vals)))
+#         if isinstance(self.cell_ids, list):
+#             ncells = 
+        data = numpy.zeros((self.cell_ids, len(T)))
+        inputs = [(stk[:,:,i], label_map[T[i]], self.cell_ids) for
+                 i in range(stk.shape[2])]
+        with multiprocessing.Pool(ncpu) as ppool:
+            results = ppool.starmap(pfunc_regionprops, inputs)
+        
+#         df = pd.DataFrame()
+#         for r, t in zip(results, T):
+#             r['t'] = t
+#             df = pd.concat((df, r), ignore_index=True)
         if outtype=='matrix':
-            return data
-        elif outtype=='dict':
-            return label_values
+            response, yx = zip(*results)
+            yx = np.stack(yx, axis=0)
+            yx = np.max(yx, axis=0)
+            return np.stack(response, axis=0), yx
+#         elif outtype=='dict':
+#             return label_values
+        
+def pfunc_regionprops(img, lbl_t, ncells):
+    global lbls
+    props = regionprops(lbls[lbl_t],
+                            intensity_image=img, cache=True)
+    data = np.zeros(ncells)
+    yx = [(0,0) for i in range(ncells)]
+    for p in props:
+        vals = p.intensity_image
+        vals = vals[vals>0].flatten()
+        data[p.label-1] = np.mean(vals)
+        yx[p.label-1] = p.centroid
+#         data.append((p.label, p.centroid, np.mean(vals)))
+#     lbls, centroids, vals = zip(*data)
+#     pd.DataFrame({'cell_id': lbls, 'centroid': centroids, 'value': vals})
+    return data, yx
 
 def segmentNucleiOnly(nuc, varargin={}):
     ## define analysis parameters
@@ -297,32 +365,80 @@ def segmentNucleiOnly(nuc, varargin={}):
         NucLabels[:,:,i] = lbls
     return NucLabels
 
-class Registration(object):
-    def __init__(self, tforms=dict()):
-        self.tforms=tforms
-    def find_translation(self, src, dest, timepoint):
-        tvec = register_translation(dest, src)
-        tform = AffineTransform(translation=(tvec[0][1], tvec[0][0]))
-        self.tforms[timepoint] = tform
-        return tform
-    def apply_tform(self, dest, dest_timepoint=None, order=1):
-        dest = dest.copy()
-        if isinstance(dest_timepoint, skimage.transform._geometric.AffineTransform):
-            pass
+# class Registration(object):
+#     def __init__(self, tforms=dict()):
+#         self.tforms=tforms
+#     def find_translation(self, src, dest, timepoint):
+#         tvec = register_translation(dest, src)
+#         tform = AffineTransform(translation=(tvec[0][1], tvec[0][0]))
+#         self.tforms[timepoint] = tform
+#         return tform
+#     def apply_tform(self, dest, dest_timepoint=None, order=1):
+#         dest = dest.copy()
+#         if isinstance(dest_timepoint, skimage.transform._geometric.AffineTransform):
+#             pass
+#         else:
+#             dest_timepoint = self.tforms[dest_timepoint]
+#         dest = warp(dest, dest_timepoint, preserve_range=True, order=order)
+#         return dest
+#     def map_and_apply_tforms(self, dest_stack, dest_timepoints, grouping='nearest', order=1):
+#         dest_stack = dest_stack.copy()
+#         source_timepoints = list(self.tforms.keys())
+#         if grouping == 'nearest':
+#             grouping = []
+#             for dest_tp in dest_timepoints:
+#                 tdist = np.abs(np.subtract(source_timepoints, dest_tp))
+#                 closest_source_tp = np.argmin(tdist)
+#                 grouping.append(source_timepoints[closest_source_tp])
+#         dest_stack = np.stack([self.apply_tform(dest_stack[:,:,i], self.tforms[grouping[i]], order=order) 
+#                               for i in range(dest_stack.shape[2])])
+#         return dest_stack
+
+class ClickRegister():
+    def __init__(self, imgstk, window_ix=(800, 800), window_size=(200, 200)):#, window = (range(800, 1000), range(800, 1000)):
+        self.stk = imgstk[window_ix[0]:window_ix[0]+window_size[0], window_ix[1]:window_ix[1]+window_size[1]]
+        self.shift_is_held=True
+        self.fig, self.ax = plt.subplots(sharex=True, sharey=True, figsize=(5, 5))
+        self.click_position={}
+        self.fig.canvas.mpl_connect('button_press_event', self.onclick)
+        self.fig.canvas.mpl_connect('key_press_event', self.on_key_press)
+        self.fig.canvas.mpl_connect('key_release_event', self.on_key_release)
+        self.current_position=None
+        self.last_position = None;
+        self.advance_plots(self.current_position)
+    def onclick(self, event):
+        if self.shift_is_held:
+            self.click_position[self.current_position-1] = (event.ydata, event.xdata)
+            self.advance_plots(self.current_position)
+#             self.ax[0].plot(event.ydata, event.xdata, marker='x', s=60)
+#             self.fig.canvas.draw()
+    def on_key_press(self, event):
+        if event.key == 'shift':
+            self.shift_is_held = True
+        elif event.key == 'n':
+            self.advance_plots(self.current_position)
+        elif event.key == 'b':
+            self.current_position  = self.current_position-2
+            self.advance_plots(self.current_position)
+        elif event.key == 'c':
+            shift_to_copy = self.click_position[self.current_position-2]
+            for i in range(-1, 10):
+                self.click_position[self.current_position+i] = shift_to_copy
+            self.current_position  = self.current_position+i
+            self.advance_plots(self.current_position)
+    def on_key_release(self, event):
+        if event.key == 'shift':
+            self.shift_is_held = False
+    def advance_plots(self, ix):
+        if ix is None:
+            ix = 0
+            self.imgfig = self.ax.imshow(imadjust(self.stk[:,:,ix], high=0.98))
+            self.fig.suptitle('Frame: '+str(ix))
+            
         else:
-            dest_timepoint = self.tforms[dest_timepoint]
-        dest = warp(dest, dest_timepoint, preserve_range=True, order=order)
-        return dest
-    def map_and_apply_tforms(self, dest_stack, dest_timepoints, grouping='nearest', order=1):
-        dest_stack = dest_stack.copy()
-        source_timepoints = list(self.tforms.keys())
-        if grouping == 'nearest':
-            grouping = []
-            for dest_tp in dest_timepoints:
-                tdist = np.abs(np.subtract(source_timepoints, dest_tp))
-                closest_source_tp = np.argmin(tdist)
-                grouping.append(source_timepoints[closest_source_tp])
-        dest_stack = np.stack([self.apply_tform(dest_stack[:,:,i], self.tforms[grouping[i]], order=order) 
-                              for i in range(dest_stack.shape[2])])
-        return dest_stack
+#             ix = self.current_position
+            self.imgfig.set_data(imadjust(self.stk[:,:,ix], high=0.98))
+            self.fig.suptitle('Frame: '+str(ix))
+        self.current_position = ix+1
+            
     

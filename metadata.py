@@ -58,6 +58,9 @@ class Metadata(object):
     def hybenames(self):
         return self.image_table.hybe.unique()
     @property
+    def md(self):
+        return self.image_table
+    @property
     def channels(self):
         return self.image_table.Channel.unique()
     @property
@@ -159,6 +162,8 @@ class Metadata(object):
             image_subset_table = image_subset_table[image_subset_table['acq'].isin(kwargs['acq'])]
         if 'Zindex' in kwargs:
             image_subset_table = image_subset_table[image_subset_table['Zindex'].isin(kwargs['Zindex'])]
+        if 'TimestampFrame' in kwargs:
+            image_subset_table = image_subset_table[image_subset_table['TimestampFrame'].isin(kwargs['TimestampFrame'])]
         if 'hybe' in kwargs:
             acqs = image_subset_table['acq']
             hybes = [i.split('_')[0] for i in acqs]
