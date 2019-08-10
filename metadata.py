@@ -17,7 +17,7 @@ class Metadata(object):
         """
         Load metadata files.
         """
-        self.base_pth = pth;
+        self.base_pth = pth
         # short circuit recursive search for metadatas if present in the top directory of 
         # the supplied pth.
         if md_name in listdir(pth):
