@@ -6,20 +6,17 @@ import numpy as np
 import sys
 
 class stkshow(object):
-    def __init__(self, X, External = False, min_thresh=5,max_thresh=95):
-        if External==False:
-            self.fig, self.ax = plt.subplots(1,1)
-            self.ax.set_title('Image Stack') # Title
-            self.X = X
-            rows, cols, self.slices = X.shape
-            self.ind = self.slices//2
-            self.vmin = np.percentile(self.X,min_thresh)
-            self.vmax = np.percentile(self.X,max_thresh)
-            self.im = self.ax.imshow(self.X[:, :, self.ind], vmin=self.vmin, vmax=self.vmax)
-            self.fig.canvas.mpl_connect('scroll_event', self.onscroll)
-            self.update()
-        else:
-            self.stkshow_window(X)
+    def __init__(self, X, min_thresh=5,max_thresh=95,cmap='inferno'):
+        self.fig, self.ax = plt.subplots(1,1)
+        self.ax.set_title('Image Stack') # Title
+        self.X = X
+        rows, cols, self.slices = X.shape
+        self.ind = 0
+        self.vmin = np.percentile(self.X,min_thresh)
+        self.vmax = np.percentile(self.X,max_thresh)
+        self.im = self.ax.imshow(self.X[:, :, self.ind], vmin=self.vmin, vmax=self.vmax,cmap=cmap)
+        self.fig.canvas.mpl_connect('scroll_event', self.onscroll)
+        self.update()
 
     def onscroll(self, event):
         print("%s %s" % (event.button, event.step))
