@@ -307,7 +307,7 @@ def stkshow(data):
         
     ## Create window with ImageView widget
     win = QtGui.QMainWindow()
-    win.resize(800,800)
+    win.resize(680,680)
     imv = pg.ImageView()
     win.setCentralWidget(imv)
     win.show()
