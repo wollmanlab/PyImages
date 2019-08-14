@@ -17,7 +17,7 @@ class Metadata(object):
         """
         Load metadata files.
         """
-        self.base_pth = pth;
+        self.base_pth = pth
         # short circuit recursive search for metadatas if present in the top directory of 
         # the supplied pth.
         if md_name in listdir(pth):
@@ -63,6 +63,9 @@ class Metadata(object):
             if 'hybe' in name:
                 hybenames.append(name)
         return hybenames
+    @property
+    def md(self):
+        return self.image_table
     @property
     def channels(self):
         return self.image_table.Channel.unique()
@@ -176,6 +179,8 @@ class Metadata(object):
             image_subset_table = image_subset_table[image_subset_table['acq'].isin(kwargs['acq'])]
         if 'Zindex' in kwargs:
             image_subset_table = image_subset_table[image_subset_table['Zindex'].isin(kwargs['Zindex'])]
+        if 'TimestampFrame' in kwargs:
+            image_subset_table = image_subset_table[image_subset_table['TimestampFrame'].isin(kwargs['TimestampFrame'])]
         if 'hybe' in kwargs:
             acqs = image_subset_table['acq']
             hybes = [i.split('_')[0] for i in acqs]
