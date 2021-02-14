@@ -2,7 +2,8 @@
 from os import walk, listdir, path
 from os.path import join, isdir
 import sys
-
+import tifffile
+import cv2
 import pandas
 import numpy
 import numpy as np
@@ -113,7 +114,7 @@ class Metadata(object):
             raise ValueError("mds argument must be a list of pandas image tables")
         og_md = mds[0]
         for md in mds[1:]:
-            og_md = og_md.append(md, ignore_index=True)
+            og_md = og_md.append(md, ignore_index=True,sort=True)
         return og_md
         
     def codestack_read(self, pos, z, bitmap, hybe_names=['hybe1', 'hybe2', 'hybe3', 'hybe4', 'hybe5', 'hybe6', 'hybe7', 'hybe8', 'hybe9'], fnames_only=False):
@@ -133,7 +134,7 @@ class Metadata(object):
             return self._open_file({pos: [i for i in stk]})
             
     def stkread(self, groupby='Position', sortby='TimestampFrame',
-                fnames_only=False, metadata=False, ffield=False, **kwargs):
+                fnames_only=False, metadata=False, ffield=False, verbose=False,**kwargs):
         """
         Main interface of Metadata
         
@@ -163,6 +164,7 @@ class Metadata(object):
         hybe : str, list(str)
         """
         # Input coercing
+        self.verbose = verbose
         for key, value in kwargs.items():
             if not isinstance(value, list):
                 kwargs[key] = [value]
@@ -175,7 +177,11 @@ class Metadata(object):
         if 'acq' in kwargs:
             image_subset_table = image_subset_table[image_subset_table['acq'].isin(kwargs['acq'])]
         if 'Zindex' in kwargs:
-            image_subset_table = image_subset_table[image_subset_table['Zindex'].isin(kwargs['Zindex'])]
+            zindexes = kwargs['Zindex']
+            if 'range' == kwargs['Zindex'][0]:
+                ran,zmin,zmax = kwargs['Zindex']
+                zindexes = range(zmin,zmax)
+            image_subset_table = image_subset_table[image_subset_table['Zindex'].isin(zindexes)]
         if 'hybe' in kwargs:
             acqs = image_subset_table['acq']
             hybes = [i.split('_')[0] for i in acqs]
@@ -233,14 +239,15 @@ class Metadata(object):
         for key, value in filename_dict.items():
             # key is groupby property value
             # value is list of filenames of images to be loaded as a stk
-            arr = io.imread(join(value[0])); 
+            arr = cv2.imread(join(value[0]),-1); 
             imgs = numpy.ndarray((numpy.size(value), numpy.size(arr,0), 
                                   numpy.size(arr,1)),arr.dtype)
             for img_idx, fname in enumerate(value):
                 # Weird print style to print on same line
-                sys.stdout.write("\r"+'opening '+path.split(fname)[-1])
-                sys.stdout.flush()
-                img = io.imread(join(fname))
+                if self.verbose:
+                    sys.stdout.write("\r"+'opening '+path.split(fname)[-1])
+                    sys.stdout.flush()
+                img = cv2.imread(join(fname),-1)
                 if ffield:
                     img = self.doFlatFieldCorrection(img, fname)
                 imgs[img_idx,:,:]=img
