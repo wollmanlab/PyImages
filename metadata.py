@@ -14,11 +14,12 @@ from skimage import img_as_float, img_as_uint, io
 #stkshow imports
 
 class Metadata(object):
-    def __init__(self, pth, md_name='Metadata.txt', load_type='local'):
+    def __init__(self, pth, md_name='Metadata.txt', load_type='local',low_memory=True):
         """
         Load metadata files.
         """
         self.base_pth = pth
+        self.low_memory = low_memory
         # short circuit recursive search for metadatas if present in the top directory of 
         # the supplied pth.
         if md_name in listdir(pth):
@@ -38,18 +39,18 @@ class Metadata(object):
             self._open_file=self._read_local
         elif load_type=='google_cloud':
             raise NotImplementedError("google_cloud loading is not implemented.")
-        # Handle columns that don't import from text well
-        try:
-            self.convert_data('XY', float)
-            if 'XYbefore' in list(self.image_table.columns):
-                self.convert_data('XYbefore', float)
-            if 'XYbeforeTransform' in list(self.image_table.columns):
-                self.convert_data('XYbeforeTransform', float)
-            if 'linescan' in list(self.image_table.columns):
-                self.convert_data('linescan', float)
-        except Exception as e:
-            self.image_table['XY'] = [literal_eval(i) for i in self.image_table['XY']]
-            self.image_table['XYbeforeTransform'] = [literal_eval(i) for i in self.image_table['XYbeforeTransform']]
+        # # Handle columns that don't import from text well
+        # try:
+        #     self.convert_data('XY', float)
+        #     # if 'XYbefore' in list(self.image_table.columns):
+        #     #     self.convert_data('XYbefore', float)
+        #     # if 'XYbeforeTransform' in list(self.image_table.columns):
+        #     #     self.convert_data('XYbeforeTransform', float)
+        #     # if 'linescan' in list(self.image_table.columns):
+        #     #     self.convert_data('linescan', float)
+        # except Exception as e:
+        #     self.image_table['XY'] = [literal_eval(i) for i in self.image_table['XY']]
+        #     self.image_table['XYbeforeTransform'] = [literal_eval(i) for i in self.image_table['XYbeforeTransform']]
             
             
     @property
@@ -91,9 +92,17 @@ class Metadata(object):
         """
         Helper function to load a text metadata file.
         """
-        md = pandas.read_csv(join(pth, fname), delimiter=delimiter)
+        def convert(val):
+            return np.array(list(map(float, val.split())))
+        if self.low_memory:
+            usecols = ['Channel', 'Exposure', 'Position', 'Scope', 'XY', 'Z', 'Zindex', 'acq', 'filename','TimestampFrame']
+            md = pandas.read_csv(join(pth, fname), delimiter=delimiter,usecols=usecols,converters={'XY':convert})
+        else:
+            md = pandas.read_csv(join(pth, fname), delimiter=delimiter,converters={'XY':convert})
         md['root_pth'] = md.filename
-        md.filename = [join(pth, f) for f in md.filename]
+        if pth[-1]!='/':
+            pth = pth+'/'
+        md.filename = pth + md.filename#[join(pth, f) for f in md.filename]
         return md
     
 #     def update_metadata(self,acqs='All',fname='Metadata.txt', delimiter='\t'):
@@ -115,9 +124,10 @@ class Metadata(object):
         """
         if not isinstance(mds, list):
             raise ValueError("mds argument must be a list of pandas image tables")
-        og_md = mds[0]
-        for md in mds[1:]:
-            og_md = og_md.append(md, ignore_index=True,sort=True)
+        og_md = pandas.concat(mds,ignore_index=True)
+        # og_md = mds[0]
+        # for md in mds[1:]:
+        #     og_md = og_md.append(md, ignore_index=True,sort=True)
         return og_md
         
     def codestack_read(self, pos, z, bitmap, hybe_names=['hybe1', 'hybe2', 'hybe3', 'hybe4', 'hybe5', 'hybe6', 'hybe7', 'hybe8', 'hybe9'], fnames_only=False):
@@ -165,6 +175,7 @@ class Metadata(object):
         Zindex : int, list(int)
         acq : str, list(str)
         hybe : str, list(str)
+        exposure : int, list(int)
         """
         # Input coercing
         self.verbose = verbose
@@ -197,6 +208,9 @@ class Metadata(object):
                 else:
                     keepers.append(False)
             image_subset_table = image_subset_table[keepers]
+        if 'Exposure' in kwargs:
+            exposures = kwargs['Exposure']
+            image_subset_table = image_subset_table[image_subset_table['Exposure'].isin(exposures)]
         # Group images and sort them then extract filenames of sorted images
         image_subset_table.sort_values(sortby, inplace=True)
         image_groups = image_subset_table.groupby(groupby)
