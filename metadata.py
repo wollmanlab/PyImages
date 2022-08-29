@@ -7,6 +7,7 @@ import cv2
 import pandas
 import numpy
 import numpy as np
+import os
 from ast import literal_eval
 
 from skimage import img_as_float, img_as_uint, io
@@ -21,18 +22,28 @@ class Metadata(object):
         self.base_pth = pth
         self.low_memory = low_memory
         # short circuit recursive search for metadatas if present in the top directory of 
+        # """ VERY SLOW WITH LARGE DATASETS """
         # the supplied pth.
-        if md_name in listdir(pth):
+        # if md_name in listdir(pth):
+        #     self.image_table = self.load_metadata(join(pth), fname=md_name)
+        # # Recursively append all metadatas in children directories of pth
+        # else:
+        #     all_mds = []
+        #     for subdir, curdir, filez in walk(pth):
+        #         if md_name in filez:
+        #             try:
+        #                 all_mds.append(self.load_metadata(join(pth, subdir), fname=md_name))
+        #             except:
+        #                 continue
+        #     self.image_table = self.merge_mds(all_mds)
+
+        if os.path.exists(os.path.join(pth,md_name)):
             self.image_table = self.load_metadata(join(pth), fname=md_name)
-        # Recursively append all metadatas in children directories of pth
         else:
             all_mds = []
-            for subdir, curdir, filez in walk(pth):
-                if md_name in filez:
-                    try:
-                        all_mds.append(self.load_metadata(join(pth, subdir), fname=md_name))
-                    except:
-                        continue
+            for directory in os.listdir(pth):
+                if os.path.exists(os.path.join(pth,directory,md_name)):
+                    all_mds.append(self.load_metadata(os.path.join(pth,directory), fname=md_name))
             self.image_table = self.merge_mds(all_mds)
         # Future compability for different load types (e.g. remote vs local)
         if load_type=='local':
