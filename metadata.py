@@ -15,7 +15,7 @@ from skimage import img_as_float, img_as_uint, io
 #stkshow imports
 
 class Metadata(object):
-    def __init__(self, pth, md_name='Metadata.txt', load_type='local',low_memory=True):
+    def __init__(self, pth, md_name='Metadata.txt', load_type='local',low_memory=False):
         """
         Load metadata files.
         """
@@ -141,21 +141,21 @@ class Metadata(object):
         #     og_md = og_md.append(md, ignore_index=True,sort=True)
         return og_md
         
-    def codestack_read(self, pos, z, bitmap, hybe_names=['hybe1', 'hybe2', 'hybe3', 'hybe4', 'hybe5', 'hybe6', 'hybe7', 'hybe8', 'hybe9'], fnames_only=False):
-        """
-        Wrapper to load seqFISH images.
-        """
-        hybe_ref = 1
-        seq_name, hybe, channel = bitmap[0]
-        stk = [self.stkread(Position=pos, Zindex=z, hybe=hybe, 
-                               Channel=channel, fnames_only=True)[pos][0]]
-        for seq_name, hybe, channel in bitmap[1:]:
-            stk.append(self.stkread(Position=pos, Zindex=z, hybe=hybe, 
-                                   Channel=channel, fnames_only=True)[pos][0])
-        if fnames_only:
-            return [i for i in stk]
-        else:
-            return self._open_file({pos: [i for i in stk]})
+#     def codestack_read(self, pos, z, bitmap, hybe_names=['hybe1', 'hybe2', 'hybe3', 'hybe4', 'hybe5', 'hybe6', 'hybe7', 'hybe8', 'hybe9'], fnames_only=False):
+#         """
+#         Wrapper to load seqFISH images.
+#         """
+#         hybe_ref = 1
+#         seq_name, hybe, channel = bitmap[0]
+#         stk = [self.stkread(Position=pos, Zindex=z, hybe=hybe, 
+#                                Channel=channel, fnames_only=True)[pos][0]]
+#         for seq_name, hybe, channel in bitmap[1:]:
+#             stk.append(self.stkread(Position=pos, Zindex=z, hybe=hybe, 
+#                                    Channel=channel, fnames_only=True)[pos][0])
+#         if fnames_only:
+#             return [i for i in stk]
+#         else:
+#             return self._open_file({pos: [i for i in stk]})
             
     def stkread(self, groupby='Position', sortby='TimestampFrame',
                 fnames_only=False, metadata=False, ffield=False, verbose=False,**kwargs):
@@ -252,14 +252,14 @@ class Metadata(object):
                     return stk[posname]
                 else:
                     return stk
-    def save_images(self, images, fname = '/Users/robertf/Downloads/tmp_stk.tif'):
-        with TiffWriter(fname, bigtiff=False, imagej=True) as t:
-            if len(images.shape)>2:
-                for i in range(images.shape[2]):
-                    t.save(img_as_uint(images[:,:,i]))
-            else:
-                t.save(img_as_uint(images))
-        return fname
+    # def save_images(self, images, fname = '/Users/robertf/Downloads/tmp_stk.tif'):
+    #     with TiffWriter(fname, bigtiff=False, imagej=True) as t:
+    #         if len(images.shape)>2:
+    #             for i in range(images.shape[2]):
+    #                 t.save(img_as_uint(images[:,:,i]))
+    #         else:
+    #             t.save(img_as_uint(images))
+    #     return fname
         
     def _read_local(self, filename_dict, ffield=False, verbose=False):
         """
@@ -293,119 +293,119 @@ class Metadata(object):
 
 
         
-    def doFlatfieldCorrection(self, img, flt, **kwargs):
-        """
-        Perform flatfield correction.
+#     def doFlatfieldCorrection(self, img, flt, **kwargs):
+#         """
+#         Perform flatfield correction.
         
-        Parameters
-        ----------
-        img : numpy.ndarray
-            2D image of type integer
-        flt : numpy.ndarray
-            2D image of type integer with the flatfield
-        """
-        print("Not implemented well. Woulnd't advise using")
-        cameraoffset = 100./2**16
-        bitdepth = 2.**16
-        flt = flt.astype(np.float32) - cameraoffset
-        flt = np.divide(flt, np.nanmean(flt.flatten()))
+#         Parameters
+#         ----------
+#         img : numpy.ndarray
+#             2D image of type integer
+#         flt : numpy.ndarray
+#             2D image of type integer with the flatfield
+#         """
+#         print("Not implemented well. Woulnd't advise using")
+#         cameraoffset = 100./2**16
+#         bitdepth = 2.**16
+#         flt = flt.astype(np.float32) - cameraoffset
+#         flt = np.divide(flt, np.nanmean(flt.flatten()))
         
-        img = np.divide((img-cameraoffset).astype(np.float32), flt+cameraoffset)
-        flat_img = img.flatten()
-        rand_subset = np.random.randint(0, high=len(flat_img), size=10000)
-        flat_img = flat_img[rand_subset]
-        flat_img = np.percentile(flat_img, 1)
-        np.place(img, flt<0.05, flat_img)
-        np.place(img, img<0, 0)
-        np.place(img, img>bitdepth, bitdepth)
-        return img
+#         img = np.divide((img-cameraoffset).astype(np.float32), flt+cameraoffset)
+#         flat_img = img.flatten()
+#         rand_subset = np.random.randint(0, high=len(flat_img), size=10000)
+#         flat_img = flat_img[rand_subset]
+#         flat_img = np.percentile(flat_img, 1)
+#         np.place(img, flt<0.05, flat_img)
+#         np.place(img, img<0, 0)
+#         np.place(img, img>bitdepth, bitdepth)
+#         return img
 
-from numba import jit
-@jit(nopython = True)
-def DownScale(imgin): #use 2x downscaling for scrol speed   
-        #imgout = trans.downscale_local_mean(imgin,(Sc, Sc))
-    imgout = (imgin[0::2,0::2]+imgin[1::2,0::2]+imgin[0::2,1::2]+imgin[1::2,1::2])/4
-    return imgout
+# from numba import jit
+# @jit(nopython = True)
+# def DownScale(imgin): #use 2x downscaling for scrol speed   
+#         #imgout = trans.downscale_local_mean(imgin,(Sc, Sc))
+#     imgout = (imgin[0::2,0::2]+imgin[1::2,0::2]+imgin[0::2,1::2]+imgin[1::2,1::2])/4
+#     return imgout
 
-def stkshow(data):
-    from pyqtgraph.Qt import QtCore, QtGui
-    import pyqtgraph as pg
-    import sys
-    import skimage.transform as trans
+# def stkshow(data):
+#     from pyqtgraph.Qt import QtCore, QtGui
+#     import pyqtgraph as pg
+#     import sys
+#     import skimage.transform as trans
 
     
-    # determine if you need to start a Qt app. 
-    # If running from Spyder, the answer is a no.
-    # From cmd, yes. From nb, not sure actually.
-    if not QtGui.QApplication.instance():
-        app = QtGui.QApplication([])
-    else:
-        app = QtGui.QApplication.instance()
+#     # determine if you need to start a Qt app. 
+#     # If running from Spyder, the answer is a no.
+#     # From cmd, yes. From nb, not sure actually.
+#     if not QtGui.QApplication.instance():
+#         app = QtGui.QApplication([])
+#     else:
+#         app = QtGui.QApplication.instance()
         
-    ## Create window with ImageView widget
-    win = QtGui.QMainWindow()
-    win.resize(680,680)
-    imv = pg.ImageView()
-    win.setCentralWidget(imv)
-    win.show()
-    win.setWindowTitle('Fetching image stack...')
+#     ## Create window with ImageView widget
+#     win = QtGui.QMainWindow()
+#     win.resize(680,680)
+#     imv = pg.ImageView()
+#     win.setCentralWidget(imv)
+#     win.show()
+#     win.setWindowTitle('Fetching image stack...')
     
     
     
     
-    resizeflg = 0;
-    maxxysize = 800;
-    maxdataxySc = np.floor(max(data.shape[0],data.shape[1])/maxxysize).astype('int')
-    if maxdataxySc>1:
-        resizeflg = 1;
+#     resizeflg = 0;
+#     maxxysize = 800;
+#     maxdataxySc = np.floor(max(data.shape[0],data.shape[1])/maxxysize).astype('int')
+#     if maxdataxySc>1:
+#         resizeflg = 1;
 
-    if len(data.shape)==4:#RGB assume xytc
-        if data.shape[3]==3 or data.shape[3]==4:
-            if resizeflg:
-                dataRs = np.zeros((np.ceil(data.shape/np.array([maxdataxySc,maxdataxySc,1,1]))).astype('int'),dtype = 'uint16')    
-                for i in range(0,data.shape[2]):
-                    for j in range(0,data.shape[3]):
-                        dataRs[:,:,i,j] = DownScale(data[:,:,i,j])
-                dataRs = dataRs.transpose((2,0,1,3))
-            else:
-                dataRs = data;
-                dataRs = dataRs.transpose((2,0,1,3))
-        else:
-            sys.exit('color channel needs to be RGB or RGBA')
-    elif len(data.shape)==3:
-        if resizeflg:
-            dataRs = np.zeros((np.ceil(data.shape/np.array([maxdataxySc,maxdataxySc,1]))).astype('int'),dtype = 'uint16')    
-            for i in range(0,data.shape[2]):
-                dataRs[:,:,i] = DownScale(data[:,:,i])
-            dataRs = dataRs.transpose([2,0,1])
-        else:
-            dataRs = data;
-            dataRs = dataRs.transpose([2,0,1])
+#     if len(data.shape)==4:#RGB assume xytc
+#         if data.shape[3]==3 or data.shape[3]==4:
+#             if resizeflg:
+#                 dataRs = np.zeros((np.ceil(data.shape/np.array([maxdataxySc,maxdataxySc,1,1]))).astype('int'),dtype = 'uint16')    
+#                 for i in range(0,data.shape[2]):
+#                     for j in range(0,data.shape[3]):
+#                         dataRs[:,:,i,j] = DownScale(data[:,:,i,j])
+#                 dataRs = dataRs.transpose((2,0,1,3))
+#             else:
+#                 dataRs = data;
+#                 dataRs = dataRs.transpose((2,0,1,3))
+#         else:
+#             sys.exit('color channel needs to be RGB or RGBA')
+#     elif len(data.shape)==3:
+#         if resizeflg:
+#             dataRs = np.zeros((np.ceil(data.shape/np.array([maxdataxySc,maxdataxySc,1]))).astype('int'),dtype = 'uint16')    
+#             for i in range(0,data.shape[2]):
+#                 dataRs[:,:,i] = DownScale(data[:,:,i])
+#             dataRs = dataRs.transpose([2,0,1])
+#         else:
+#             dataRs = data;
+#             dataRs = dataRs.transpose([2,0,1])
                 
-    elif len(data.shape)==2:
-        if resizeflg:
-            dataRs = np.zeros((np.ceil(data.shape/np.array([maxdataxySc,maxdataxySc]))).astype('int'),dtype = 'uint16')
-            dataRs = DownScale(data)
-        else:
-            dataRs = data;
-    else:
-        print('Data must be 2D image or 3D image stack')
+#     elif len(data.shape)==2:
+#         if resizeflg:
+#             dataRs = np.zeros((np.ceil(data.shape/np.array([maxdataxySc,maxdataxySc]))).astype('int'),dtype = 'uint16')
+#             dataRs = DownScale(data)
+#         else:
+#             dataRs = data;
+#     else:
+#         print('Data must be 2D image or 3D image stack')
     
 
     
-    # Interpret image data as row-major instead of col-major
-    pg.setConfigOptions(imageAxisOrder='row-major')
+#     # Interpret image data as row-major instead of col-major
+#     pg.setConfigOptions(imageAxisOrder='row-major')
     
 
-    win.setWindowTitle('Stack')
+#     win.setWindowTitle('Stack')
     
-    ## Display the data and assign each frame a 
-    imv.setImage(dataRs)#, xvals=np.linspace(1., dataRs.shape[0], dataRs.shape[0]))
+#     ## Display the data and assign each frame a 
+#     imv.setImage(dataRs)#, xvals=np.linspace(1., dataRs.shape[0], dataRs.shape[0]))
 
-    ##must return the window to keep it open
-    return win
-    ## Start Qt event loop unless running in interactive mode.
-    if __name__ == '__main__':
-        import sys
-        if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
-            QtGui.QApplication.instance().exec_()
+#     ##must return the window to keep it open
+#     return win
+#     ## Start Qt event loop unless running in interactive mode.
+#     if __name__ == '__main__':
+#         import sys
+#         if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
+#             QtGui.QApplication.instance().exec_()
