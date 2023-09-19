@@ -9,6 +9,7 @@ import numpy
 import numpy as np
 import os
 from ast import literal_eval
+import dill as pickle
 
 from skimage import img_as_float, img_as_uint, io
 
@@ -99,21 +100,37 @@ class Metadata(object):
                 converted.append(i)
         self.image_table[column] = converted
 
-    def load_metadata(self, pth, fname='Metadata.txt', delimiter='\t'):
+    def load_metadata(self, pth, fname='Metadata.txt', delimiter='\t',try_shortcut=True):
         """
         Helper function to load a text metadata file.
         """
-        def convert(val):
-            return np.array(list(map(float, val.split())))
-        if self.low_memory:
-            usecols = ['Channel', 'Exposure', 'Position', 'Scope', 'XY', 'Z', 'Zindex', 'acq', 'filename','TimestampFrame']
-            md = pandas.read_csv(join(pth, fname), delimiter=delimiter,usecols=usecols,converters={'XY':convert})
-        else:
-            md = pandas.read_csv(join(pth, fname), delimiter=delimiter,converters={'XY':convert})
-        md['root_pth'] = md.filename
-        if pth[-1]!='/':
-            pth = pth+'/'
-        md.filename = pth + md.filename#[join(pth, f) for f in md.filename]
+        shortcut = False
+        if try_shortcut:
+            # Look for a pkl file to load faster
+            pkl_pth = join(pth, fname.split('.')[0]+'.pkl')
+            if os.path.exists(pkl_pth):
+                try:
+                    md = pickle.load(open(pkl_pth,'rb'))
+                    shortcut = True
+                except:
+                    print('Shortcut Failed')
+                    print(pkl_pth)
+                    shortcut = False
+        if not shortcut:
+            def convert(val):
+                return np.array(list(map(float, val.split())))
+            if self.low_memory:
+                usecols = ['Channel', 'Exposure', 'Position', 'Scope', 'XY', 'Z', 'Zindex', 'acq', 'filename','TimestampFrame']
+                md = pandas.read_csv(join(pth, fname), delimiter=delimiter,usecols=usecols,converters={'XY':convert})
+            else:
+                md = pandas.read_csv(join(pth, fname), delimiter=delimiter,converters={'XY':convert})
+            md['root_pth'] = md.filename
+            if pth[-1]!='/':
+                pth = pth+'/'
+            md.filename = pth + md.filename#[join(pth, f) for f in md.filename]
+            if try_shortcut:
+                # dump pickle for faster loading next time
+                pickle.dump(md,open(pkl_pth,'wb'))
         return md
     
 #     def update_metadata(self,acqs='All',fname='Metadata.txt', delimiter='\t'):
