@@ -130,7 +130,10 @@ class Metadata(object):
             md.filename = pth + md.filename#[join(pth, f) for f in md.filename]
             if try_shortcut:
                 # dump pickle for faster loading next time
-                pickle.dump(md,open(pkl_pth,'wb'))
+                try:
+                    pickle.dump(md,open(pkl_pth,'wb'))
+                except Exception as e:
+                    print(pkl_pth,e)
         return md
     
 #     def update_metadata(self,acqs='All',fname='Metadata.txt', delimiter='\t'):
