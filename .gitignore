@@ -1,0 +1,4 @@
+
+*.pyc
+depricated/
+pyimages.egg-info/

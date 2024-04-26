@@ -7,49 +7,62 @@ import cv2
 import pandas
 import numpy
 import numpy as np
+import os
 from ast import literal_eval
+import dill as pickle
 
 from skimage import img_as_float, img_as_uint, io
 
 #stkshow imports
 
 class Metadata(object):
-    def __init__(self, pth, md_name='Metadata.txt', load_type='local'):
+    def __init__(self, pth, md_name='Metadata.txt', load_type='local',low_memory=False):
         """
         Load metadata files.
         """
         self.base_pth = pth
+        self.low_memory = low_memory
         # short circuit recursive search for metadatas if present in the top directory of 
+        # """ VERY SLOW WITH LARGE DATASETS """
         # the supplied pth.
-        if md_name in listdir(pth):
+        # if md_name in listdir(pth):
+        #     self.image_table = self.load_metadata(join(pth), fname=md_name)
+        # # Recursively append all metadatas in children directories of pth
+        # else:
+        #     all_mds = []
+        #     for subdir, curdir, filez in walk(pth):
+        #         if md_name in filez:
+        #             try:
+        #                 all_mds.append(self.load_metadata(join(pth, subdir), fname=md_name))
+        #             except:
+        #                 continue
+        #     self.image_table = self.merge_mds(all_mds)
+
+        if os.path.exists(os.path.join(pth,md_name)):
             self.image_table = self.load_metadata(join(pth), fname=md_name)
-        # Recursively append all metadatas in children directories of pth
         else:
             all_mds = []
-            for subdir, curdir, filez in walk(pth):
-                if md_name in filez:
-                    try:
-                        all_mds.append(self.load_metadata(join(pth, subdir), fname=md_name))
-                    except:
-                        continue
+            for directory in os.listdir(pth):
+                if os.path.exists(os.path.join(pth,directory,md_name)):
+                    all_mds.append(self.load_metadata(os.path.join(pth,directory), fname=md_name))
             self.image_table = self.merge_mds(all_mds)
         # Future compability for different load types (e.g. remote vs local)
         if load_type=='local':
             self._open_file=self._read_local
         elif load_type=='google_cloud':
             raise NotImplementedError("google_cloud loading is not implemented.")
-        # Handle columns that don't import from text well
-        try:
-            self.convert_data('XY', float)
-            if 'XYbefore' in list(self.image_table.columns):
-                self.convert_data('XYbefore', float)
-            if 'XYbeforeTransform' in list(self.image_table.columns):
-                self.convert_data('XYbeforeTransform', float)
-            if 'linescan' in list(self.image_table.columns):
-                self.convert_data('linescan', float)
-        except Exception as e:
-            self.image_table['XY'] = [literal_eval(i) for i in self.image_table['XY']]
-            self.image_table['XYbeforeTransform'] = [literal_eval(i) for i in self.image_table['XYbeforeTransform']]
+        # # Handle columns that don't import from text well
+        # try:
+        #     self.convert_data('XY', float)
+        #     # if 'XYbefore' in list(self.image_table.columns):
+        #     #     self.convert_data('XYbefore', float)
+        #     # if 'XYbeforeTransform' in list(self.image_table.columns):
+        #     #     self.convert_data('XYbeforeTransform', float)
+        #     # if 'linescan' in list(self.image_table.columns):
+        #     #     self.convert_data('linescan', float)
+        # except Exception as e:
+        #     self.image_table['XY'] = [literal_eval(i) for i in self.image_table['XY']]
+        #     self.image_table['XYbeforeTransform'] = [literal_eval(i) for i in self.image_table['XYbeforeTransform']]
             
             
     @property
@@ -88,13 +101,40 @@ class Metadata(object):
                 converted.append(i)
         self.image_table[column] = converted
 
-    def load_metadata(self, pth, fname='Metadata.txt', delimiter='\t'):
+    def load_metadata(self, pth, fname='Metadata.txt', delimiter='\t',try_shortcut=True):
         """
         Helper function to load a text metadata file.
         """
-        md = pandas.read_csv(join(pth, fname), delimiter=delimiter)
-        md['root_pth'] = md.filename
-        md.filename = [join(pth, f) for f in md.filename]
+        shortcut = False
+        if try_shortcut:
+            # Look for a pkl file to load faster
+            pkl_pth = join(pth, fname.split('.')[0]+'.pkl')
+            if os.path.exists(pkl_pth):
+                try:
+                    md = pickle.load(open(pkl_pth,'rb'))
+                    shortcut = True
+                except:
+                    print('Shortcut Failed')
+                    print(pkl_pth)
+                    shortcut = False
+        if not shortcut:
+            def convert(val):
+                return np.array(list(map(float, val.split())))
+            if self.low_memory:
+                usecols = ['Channel', 'Exposure', 'Position', 'Scope', 'XY', 'Z', 'Zindex', 'acq', 'filename','TimestampFrame']
+                md = pandas.read_csv(join(pth, fname), delimiter=delimiter,usecols=usecols,converters={'XY':convert})
+            else:
+                md = pandas.read_csv(join(pth, fname), delimiter=delimiter,converters={'XY':convert})
+            md['root_pth'] = md.filename
+            if pth[-1]!='/':
+                pth = pth+'/'
+            md.filename = pth + md.filename#[join(pth, f) for f in md.filename]
+            if try_shortcut:
+                # dump pickle for faster loading next time
+                try:
+                    pickle.dump(md,open(pkl_pth,'wb'))
+                except Exception as e:
+                    print(pkl_pth,e)
         return md
     
 #     def update_metadata(self,acqs='All',fname='Metadata.txt', delimiter='\t'):
@@ -123,21 +163,21 @@ class Metadata(object):
         #     og_md = og_md.append(md, ignore_index=True,sort=True)
         # return og_md
         
-    def codestack_read(self, pos, z, bitmap, hybe_names=['hybe1', 'hybe2', 'hybe3', 'hybe4', 'hybe5', 'hybe6', 'hybe7', 'hybe8', 'hybe9'], fnames_only=False):
-        """
-        Wrapper to load seqFISH images.
-        """
-        hybe_ref = 1
-        seq_name, hybe, channel = bitmap[0]
-        stk = [self.stkread(Position=pos, Zindex=z, hybe=hybe, 
-                               Channel=channel, fnames_only=True)[pos][0]]
-        for seq_name, hybe, channel in bitmap[1:]:
-            stk.append(self.stkread(Position=pos, Zindex=z, hybe=hybe, 
-                                   Channel=channel, fnames_only=True)[pos][0])
-        if fnames_only:
-            return [i for i in stk]
-        else:
-            return self._open_file({pos: [i for i in stk]})
+#     def codestack_read(self, pos, z, bitmap, hybe_names=['hybe1', 'hybe2', 'hybe3', 'hybe4', 'hybe5', 'hybe6', 'hybe7', 'hybe8', 'hybe9'], fnames_only=False):
+#         """
+#         Wrapper to load seqFISH images.
+#         """
+#         hybe_ref = 1
+#         seq_name, hybe, channel = bitmap[0]
+#         stk = [self.stkread(Position=pos, Zindex=z, hybe=hybe, 
+#                                Channel=channel, fnames_only=True)[pos][0]]
+#         for seq_name, hybe, channel in bitmap[1:]:
+#             stk.append(self.stkread(Position=pos, Zindex=z, hybe=hybe, 
+#                                    Channel=channel, fnames_only=True)[pos][0])
+#         if fnames_only:
+#             return [i for i in stk]
+#         else:
+#             return self._open_file({pos: [i for i in stk]})
             
     def stkread(self, groupby='Position', sortby=None,
                 fnames_only=False, metadata=False, ffield=False, verbose=False,**kwargs):
@@ -168,6 +208,7 @@ class Metadata(object):
         Zindex : int, list(int)
         acq : str, list(str)
         hybe : str, list(str)
+        exposure : int, list(int)
         """
         # Input coercing
         self.verbose = verbose
@@ -243,15 +284,14 @@ class Metadata(object):
                     return stk[posname]
                 else:
                     return stk
-                
-    def save_images(self, images, fname = '/Users/robertf/Downloads/tmp_stk.tif'):
-        with TiffWriter(fname, bigtiff=False, imagej=True) as t:
-            if len(images.shape)>2:
-                for i in range(images.shape[2]):
-                    t.save(img_as_uint(images[:,:,i]))
-            else:
-                t.save(img_as_uint(images))
-        return fname
+    #def save_images(self, images, fname = '/Users/robertf/Downloads/tmp_stk.tif'):
+    #    with TiffWriter(fname, bigtiff=False, imagej=True) as t:
+    #        if len(images.shape)>2:
+    #            for i in range(images.shape[2]):
+    #                t.save(img_as_uint(images[:,:,i]))
+    #        else:
+    #            t.save(img_as_uint(images))
+    #    return fname
         
     def _read_local(self, filename_dict, ffield=False, verbose=False):
         """
@@ -285,119 +325,119 @@ class Metadata(object):
 
 
         
-    def doFlatfieldCorrection(self, img, flt, **kwargs):
-        """
-        Perform flatfield correction.
+#     def doFlatfieldCorrection(self, img, flt, **kwargs):
+#         """
+#         Perform flatfield correction.
         
-        Parameters
-        ----------
-        img : numpy.ndarray
-            2D image of type integer
-        flt : numpy.ndarray
-            2D image of type integer with the flatfield
-        """
-        print("Not implemented well. Woulnd't advise using")
-        cameraoffset = 100./2**16
-        bitdepth = 2.**16
-        flt = flt.astype(np.float32) - cameraoffset
-        flt = np.divide(flt, np.nanmean(flt.flatten()))
+#         Parameters
+#         ----------
+#         img : numpy.ndarray
+#             2D image of type integer
+#         flt : numpy.ndarray
+#             2D image of type integer with the flatfield
+#         """
+#         print("Not implemented well. Woulnd't advise using")
+#         cameraoffset = 100./2**16
+#         bitdepth = 2.**16
+#         flt = flt.astype(np.float32) - cameraoffset
+#         flt = np.divide(flt, np.nanmean(flt.flatten()))
         
-        img = np.divide((img-cameraoffset).astype(np.float32), flt+cameraoffset)
-        flat_img = img.flatten()
-        rand_subset = np.random.randint(0, high=len(flat_img), size=10000)
-        flat_img = flat_img[rand_subset]
-        flat_img = np.percentile(flat_img, 1)
-        np.place(img, flt<0.05, flat_img)
-        np.place(img, img<0, 0)
-        np.place(img, img>bitdepth, bitdepth)
-        return img
+#         img = np.divide((img-cameraoffset).astype(np.float32), flt+cameraoffset)
+#         flat_img = img.flatten()
+#         rand_subset = np.random.randint(0, high=len(flat_img), size=10000)
+#         flat_img = flat_img[rand_subset]
+#         flat_img = np.percentile(flat_img, 1)
+#         np.place(img, flt<0.05, flat_img)
+#         np.place(img, img<0, 0)
+#         np.place(img, img>bitdepth, bitdepth)
+#         return img
 
-from numba import jit
-@jit(nopython = True)
-def DownScale(imgin): #use 2x downscaling for scrol speed   
-        #imgout = trans.downscale_local_mean(imgin,(Sc, Sc))
-    imgout = (imgin[0::2,0::2]+imgin[1::2,0::2]+imgin[0::2,1::2]+imgin[1::2,1::2])/4
-    return imgout
+# from numba import jit
+# @jit(nopython = True)
+# def DownScale(imgin): #use 2x downscaling for scrol speed   
+#         #imgout = trans.downscale_local_mean(imgin,(Sc, Sc))
+#     imgout = (imgin[0::2,0::2]+imgin[1::2,0::2]+imgin[0::2,1::2]+imgin[1::2,1::2])/4
+#     return imgout
 
-def stkshow(data):
-    from pyqtgraph.Qt import QtCore, QtGui
-    import pyqtgraph as pg
-    import sys
-    import skimage.transform as trans
+# def stkshow(data):
+#     from pyqtgraph.Qt import QtCore, QtGui
+#     import pyqtgraph as pg
+#     import sys
+#     import skimage.transform as trans
 
     
-    # determine if you need to start a Qt app. 
-    # If running from Spyder, the answer is a no.
-    # From cmd, yes. From nb, not sure actually.
-    if not QtGui.QApplication.instance():
-        app = QtGui.QApplication([])
-    else:
-        app = QtGui.QApplication.instance()
+#     # determine if you need to start a Qt app. 
+#     # If running from Spyder, the answer is a no.
+#     # From cmd, yes. From nb, not sure actually.
+#     if not QtGui.QApplication.instance():
+#         app = QtGui.QApplication([])
+#     else:
+#         app = QtGui.QApplication.instance()
         
-    ## Create window with ImageView widget
-    win = QtGui.QMainWindow()
-    win.resize(680,680)
-    imv = pg.ImageView()
-    win.setCentralWidget(imv)
-    win.show()
-    win.setWindowTitle('Fetching image stack...')
+#     ## Create window with ImageView widget
+#     win = QtGui.QMainWindow()
+#     win.resize(680,680)
+#     imv = pg.ImageView()
+#     win.setCentralWidget(imv)
+#     win.show()
+#     win.setWindowTitle('Fetching image stack...')
     
     
     
     
-    resizeflg = 0;
-    maxxysize = 800;
-    maxdataxySc = np.floor(max(data.shape[0],data.shape[1])/maxxysize).astype('int')
-    if maxdataxySc>1:
-        resizeflg = 1;
+#     resizeflg = 0;
+#     maxxysize = 800;
+#     maxdataxySc = np.floor(max(data.shape[0],data.shape[1])/maxxysize).astype('int')
+#     if maxdataxySc>1:
+#         resizeflg = 1;
 
-    if len(data.shape)==4:#RGB assume xytc
-        if data.shape[3]==3 or data.shape[3]==4:
-            if resizeflg:
-                dataRs = np.zeros((np.ceil(data.shape/np.array([maxdataxySc,maxdataxySc,1,1]))).astype('int'),dtype = 'uint16')    
-                for i in range(0,data.shape[2]):
-                    for j in range(0,data.shape[3]):
-                        dataRs[:,:,i,j] = DownScale(data[:,:,i,j])
-                dataRs = dataRs.transpose((2,0,1,3))
-            else:
-                dataRs = data;
-                dataRs = dataRs.transpose((2,0,1,3))
-        else:
-            sys.exit('color channel needs to be RGB or RGBA')
-    elif len(data.shape)==3:
-        if resizeflg:
-            dataRs = np.zeros((np.ceil(data.shape/np.array([maxdataxySc,maxdataxySc,1]))).astype('int'),dtype = 'uint16')    
-            for i in range(0,data.shape[2]):
-                dataRs[:,:,i] = DownScale(data[:,:,i])
-            dataRs = dataRs.transpose([2,0,1])
-        else:
-            dataRs = data;
-            dataRs = dataRs.transpose([2,0,1])
+#     if len(data.shape)==4:#RGB assume xytc
+#         if data.shape[3]==3 or data.shape[3]==4:
+#             if resizeflg:
+#                 dataRs = np.zeros((np.ceil(data.shape/np.array([maxdataxySc,maxdataxySc,1,1]))).astype('int'),dtype = 'uint16')    
+#                 for i in range(0,data.shape[2]):
+#                     for j in range(0,data.shape[3]):
+#                         dataRs[:,:,i,j] = DownScale(data[:,:,i,j])
+#                 dataRs = dataRs.transpose((2,0,1,3))
+#             else:
+#                 dataRs = data;
+#                 dataRs = dataRs.transpose((2,0,1,3))
+#         else:
+#             sys.exit('color channel needs to be RGB or RGBA')
+#     elif len(data.shape)==3:
+#         if resizeflg:
+#             dataRs = np.zeros((np.ceil(data.shape/np.array([maxdataxySc,maxdataxySc,1]))).astype('int'),dtype = 'uint16')    
+#             for i in range(0,data.shape[2]):
+#                 dataRs[:,:,i] = DownScale(data[:,:,i])
+#             dataRs = dataRs.transpose([2,0,1])
+#         else:
+#             dataRs = data;
+#             dataRs = dataRs.transpose([2,0,1])
                 
-    elif len(data.shape)==2:
-        if resizeflg:
-            dataRs = np.zeros((np.ceil(data.shape/np.array([maxdataxySc,maxdataxySc]))).astype('int'),dtype = 'uint16')
-            dataRs = DownScale(data)
-        else:
-            dataRs = data;
-    else:
-        print('Data must be 2D image or 3D image stack')
+#     elif len(data.shape)==2:
+#         if resizeflg:
+#             dataRs = np.zeros((np.ceil(data.shape/np.array([maxdataxySc,maxdataxySc]))).astype('int'),dtype = 'uint16')
+#             dataRs = DownScale(data)
+#         else:
+#             dataRs = data;
+#     else:
+#         print('Data must be 2D image or 3D image stack')
     
 
     
-    # Interpret image data as row-major instead of col-major
-    pg.setConfigOptions(imageAxisOrder='row-major')
+#     # Interpret image data as row-major instead of col-major
+#     pg.setConfigOptions(imageAxisOrder='row-major')
     
 
-    win.setWindowTitle('Stack')
+#     win.setWindowTitle('Stack')
     
-    ## Display the data and assign each frame a 
-    imv.setImage(dataRs)#, xvals=np.linspace(1., dataRs.shape[0], dataRs.shape[0]))
+#     ## Display the data and assign each frame a 
+#     imv.setImage(dataRs)#, xvals=np.linspace(1., dataRs.shape[0], dataRs.shape[0]))
 
-    ##must return the window to keep it open
-    return win
-    ## Start Qt event loop unless running in interactive mode.
-    if __name__ == '__main__':
-        import sys
-        if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
-            QtGui.QApplication.instance().exec_()
+#     ##must return the window to keep it open
+#     return win
+#     ## Start Qt event loop unless running in interactive mode.
+#     if __name__ == '__main__':
+#         import sys
+#         if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
+#             QtGui.QApplication.instance().exec_()
