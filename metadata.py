@@ -76,6 +76,7 @@ class Metadata(object):
     @property
     def acqnames(self):
         return self.image_table.acq.unique()
+    
     def convert_data(self, column, dtype, isnan=np.nan):
         converted = []
         arr = self.image_table[column].values
@@ -115,10 +116,12 @@ class Metadata(object):
         """
         if not isinstance(mds, list):
             raise ValueError("mds argument must be a list of pandas image tables")
-        og_md = mds[0]
-        for md in mds[1:]:
-            og_md = og_md.append(md, ignore_index=True,sort=True)
-        return og_md
+        merge_mds = pandas.concat(mds, ignore_index=True)
+        return merge_mds
+        # og_md = mds[0]
+        # for md in mds[1:]:
+        #     og_md = og_md.append(md, ignore_index=True,sort=True)
+        # return og_md
         
     def codestack_read(self, pos, z, bitmap, hybe_names=['hybe1', 'hybe2', 'hybe3', 'hybe4', 'hybe5', 'hybe6', 'hybe7', 'hybe8', 'hybe9'], fnames_only=False):
         """
@@ -136,7 +139,7 @@ class Metadata(object):
         else:
             return self._open_file({pos: [i for i in stk]})
             
-    def stkread(self, groupby='Position', sortby='TimestampFrame',
+    def stkread(self, groupby='Position', sortby=None,
                 fnames_only=False, metadata=False, ffield=False, verbose=False,**kwargs):
         """
         Main interface of Metadata
@@ -171,34 +174,45 @@ class Metadata(object):
         for key, value in kwargs.items():
             if not isinstance(value, list):
                 kwargs[key] = [value]
-        image_subset_table = self.image_table
+        mask = np.full((self.image_table.shape[0],),True,dtype=bool)
+        
+
         # Filter images according to some criteria
         if 'Position' in kwargs:
-            image_subset_table = image_subset_table[image_subset_table['Position'].isin(kwargs['Position'])]
+            mask = np.logical_and(mask,self.image_table['Position'].isin(kwargs['Position']))
+            # image_subset_table = image_subset_table[image_subset_table['Position'].isin(kwargs['Position'])]
         if 'Channel' in kwargs:
-            image_subset_table = image_subset_table[image_subset_table['Channel'].isin(kwargs['Channel'])]
+            mask = np.logical_and(mask,self.image_table['Channel'].isin(kwargs['Channel']))
+            # image_subset_table = image_subset_table[image_subset_table['Channel'].isin(kwargs['Channel'])]
         if 'acq' in kwargs:
-            image_subset_table = image_subset_table[image_subset_table['acq'].isin(kwargs['acq'])]
+            mask = np.logical_and(mask,self.image_table['acq'].isin(kwargs['acq']))
+            # image_subset_table = image_subset_table[image_subset_table['acq'].isin(kwargs['acq'])]
         if 'Zindex' in kwargs:
             zindexes = kwargs['Zindex']
             if 'range' == kwargs['Zindex'][0]:
                 ran,zmin,zmax = kwargs['Zindex']
                 zindexes = range(zmin,zmax)
-            image_subset_table = image_subset_table[image_subset_table['Zindex'].isin(zindexes)]
+            mask = np.logical_and(mask,self.image_table['Zindex'].isin(zindexes))
+            # image_subset_table = image_subset_table[image_subset_table['Zindex'].isin(zindexes)]
         if 'TimestampFrame' in kwargs:
-            image_subset_table = image_subset_table[image_subset_table['TimestampFrame'].isin(kwargs['TimestampFrame'])]
+            mask = np.logical_and(mask,self.image_table['TimestampFrame'].isin(kwargs['TimestampFrame']))
+            # image_subset_table = image_subset_table[image_subset_table['TimestampFrame'].isin(kwargs['TimestampFrame'])]
         if 'hybe' in kwargs:
-            acqs = image_subset_table['acq']
-            hybes = [i.split('_')[0] for i in acqs]
-            keepers = []
-            for i in hybes:
-                if i in kwargs['hybe']:
-                    keepers.append(True)
-                else:
-                    keepers.append(False)
-            image_subset_table = image_subset_table[keepers]
+            hybes = self.image_table['acq'].str.split('_').str[0]
+            mask = mask = np.logical_and(mask,hybes.isin(kwargs['hybe']))
+            # keepers = []
+            # for i in hybes:
+            #     if i in kwargs['hybe']:
+            #         keepers.append(True)
+            #     else:
+            #         keepers.append(False)
+            # image_subset_table = image_subset_table[keepers]
+        
+        image_subset_table = self.image_table.loc[mask]
+
         # Group images and sort them then extract filenames of sorted images
-        image_subset_table.sort_values(sortby, inplace=True)
+        if sortby is not None: 
+            image_subset_table.sort_values(sortby, inplace=True)
         image_groups = image_subset_table.groupby(groupby)
         fnames_output = {}
         mdata = {}
@@ -208,6 +222,8 @@ class Metadata(object):
         # Clunky block of code below allows getting filenames only, and handles returning 
         # dictionary if multiple groups present or ndarray only if single group
         if fnames_only:
+            if len(list(fnames_output.keys()))==1:
+                fnames_output = fnames_output[posname]
             if metadata:
                 if len(mdata)==1:
                     mdata = mdata[posname]
@@ -227,6 +243,7 @@ class Metadata(object):
                     return stk[posname]
                 else:
                     return stk
+                
     def save_images(self, images, fname = '/Users/robertf/Downloads/tmp_stk.tif'):
         with TiffWriter(fname, bigtiff=False, imagej=True) as t:
             if len(images.shape)>2:
