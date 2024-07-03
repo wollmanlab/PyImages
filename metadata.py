@@ -16,7 +16,7 @@ from skimage import img_as_float, img_as_uint, io
 #stkshow imports
 
 class Metadata(object):
-    def __init__(self, pth, md_name='Metadata.txt', load_type='local',low_memory=False):
+    def __init__(self, pth, md_name='Metadata.txt', load_type='local',low_memory=False,try_shortcut=True):
         """
         Load metadata files.
         """
@@ -39,12 +39,12 @@ class Metadata(object):
         #     self.image_table = self.merge_mds(all_mds)
 
         if os.path.exists(os.path.join(pth,md_name)):
-            self.image_table = self.load_metadata(join(pth), fname=md_name)
+            self.image_table = self.load_metadata(join(pth), fname=md_name,try_shortcut=try_shortcut)
         else:
             all_mds = []
             for directory in os.listdir(pth):
                 if os.path.exists(os.path.join(pth,directory,md_name)):
-                    all_mds.append(self.load_metadata(os.path.join(pth,directory), fname=md_name))
+                    all_mds.append(self.load_metadata(os.path.join(pth,directory), fname=md_name,try_shortcut=try_shortcut))
             self.image_table = self.merge_mds(all_mds)
         # Future compability for different load types (e.g. remote vs local)
         if load_type=='local':
